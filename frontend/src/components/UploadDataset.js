@@ -1,10 +1,12 @@
 import React, { useState } from "react";
+import "./UploadDataset.css";
 
 export default function UploadDataset({ onUploadSuccess }) {
   const [selectedFile, setSelectedFile] = useState(null);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [uploaded, setUploaded] = useState(false);
 
   const handleFileSelect = (e) => {
     setSelectedFile(e.target.files[0] || null);
@@ -35,11 +37,8 @@ export default function UploadDataset({ onUploadSuccess }) {
       if (response.ok) {
         setMessage(data.message);
         setMessageType("success");
+        setUploaded(true);
         if (data.questions) onUploadSuccess(data.questions);
-
-        setSelectedFile(null);
-        const fileInput = document.getElementById("fileInput");
-        if (fileInput) fileInput.value = "";
       } else {
         setMessage(data.error || "Upload failed.");
         setMessageType("error");
@@ -54,26 +53,34 @@ export default function UploadDataset({ onUploadSuccess }) {
   };
 
   return (
-    <div style={{ padding: 20, border: "1px solid #ccc", borderRadius: 12, marginBottom: 20 }}>
-      <h2>Upload Quiz Dataset</h2>
-      <input id="fileInput" type="file" accept=".csv,.xlsx" onChange={handleFileSelect} />
-      <button
-        onClick={handleUpload}
-        disabled={isLoading}
-        style={{
-          marginLeft: 10,
-          padding: "8px 16px",
-          backgroundColor: isLoading ? "#a0aec0" : "green",
-          color: "#fff",
-          border: "none",
-          borderRadius: 6,
-          cursor: isLoading ? "not-allowed" : "pointer",
-        }}
-      >
-        {isLoading ? "Uploading..." : "Upload"}
-      </button>
-      {message && (
-        <p style={{ marginTop: 10, color: messageType === "success" ? "green" : "red" }}>
+    <div className="upload-container">
+      <h2 className="upload-title">Upload Quiz Dataset</h2>
+
+      {!uploaded && (
+        <>
+          <input
+            id="fileInput"
+            type="file"
+            accept=".csv,.xlsx"
+            onChange={handleFileSelect}
+            className="file-input"
+          />
+          <button
+            onClick={handleUpload}
+            disabled={isLoading}
+            className={`upload-btn ${isLoading ? "loading" : ""}`}
+          >
+            {isLoading ? "Uploading..." : "Upload"}
+          </button>
+        </>
+      )}
+
+      {uploaded && (
+        <p className="success-message">✅ Dataset uploaded successfully! You can now start the test.</p>
+      )}
+
+      {message && !uploaded && (
+        <p className={`upload-message ${messageType === "success" ? "success" : "error"}`}>
           {message}
         </p>
       )}

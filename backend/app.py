@@ -1,7 +1,7 @@
 import pandas as pd
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import random
+import time
 
 app = Flask(__name__)
 CORS(app)
@@ -9,6 +9,7 @@ CORS(app)
 dataset = None
 used_questions = {}  # Track used question IDs per difficulty
 current_difficulty = "Very easy"
+user_sessions = {}  # Track per-user sessions
 
 
 # Upload dataset
@@ -27,7 +28,7 @@ def upload_dataset():
     except Exception as e:
         return jsonify({"error": f"Failed to read file: {str(e)}"}), 400
 
-    # Rename columns for frontend
+    # Standardize column names
     dataset.rename(columns={
         "questiontext": "question_text",
         "optiona": "option_a",
@@ -45,57 +46,71 @@ def upload_dataset():
     selected = available.sample(10)
     used_questions[current_difficulty].update(selected["id"].tolist())
 
+    # Track session start
+    user_sessions["test_user"] = {
+        "start_time": time.time(),
+        "time_logs": {}
+    }
+
     return jsonify({
         "message": "Dataset uploaded successfully!",
-        "questions": selected.to_dict(orient="records")
+        "questions": selected.to_dict(orient="records"),
+        "time_limit": 3600
     })
-
-
-# Get 10 random questions
-@app.route("/get-questions", methods=["GET"])
-def get_questions():
-    global dataset, used_questions, current_difficulty
-    if dataset is None:
-        return jsonify({"error": "Upload dataset first"}), 400
-
-    if current_difficulty not in used_questions:
-        used_questions[current_difficulty] = set()
-
-    available = dataset[
-        (dataset["difficulty"].str.lower() == current_difficulty.lower()) &
-        (~dataset["id"].isin(used_questions[current_difficulty]))
-    ]
-
-    # If fewer than 10 remaining, reset used_questions for this difficulty
-    if len(available) < 10:
-        used_questions[current_difficulty] = set()
-        available = dataset[dataset["difficulty"].str.lower() == current_difficulty.lower()]
-
-    selected = available.sample(10)
-    used_questions[current_difficulty].update(selected["id"].tolist())
-    return jsonify(selected.to_dict(orient="records"))
 
 
 # Submit answers
 @app.route("/submit", methods=["POST"])
 def submit_answers():
     global dataset, current_difficulty, used_questions
+
     data = request.json
     answers = data.get("answers", {})
+    time_logs = data.get("time_logs", {})
+
+    session = user_sessions.get("test_user", {})
+    start_time = session.get("start_time", time.time())
+
+    elapsed_time = time.time() - start_time
+    if elapsed_time > 3600:  # 1 hour limit
+        return jsonify({"error": "⏳ Test time exceeded 1 hour. Auto-submitted."}), 403
 
     correct_count = 0
+    solutions = []
+    total_time = 0
+    max_time_val = -1
+    max_time_q = None
+
     for qid, user_ans in answers.items():
         try:
-            qid_int = int(float(qid))  # Handle numeric IDs properly
+            qid_int = int(float(qid))
             row = dataset[dataset["id"] == qid_int].iloc[0]
             correct_ans = str(row["answer"]).strip().lower()
             user_ans_clean = str(user_ans).strip().lower()
-            if correct_ans == user_ans_clean:
-                correct_count += 1
-        except IndexError:
-            continue  # ID not found in dataset
 
-    # If all 10 correct → move to next difficulty
+            is_correct = correct_ans == user_ans_clean
+            if is_correct:
+                correct_count += 1
+
+            q_time = float(time_logs.get(str(qid), 0))
+            total_time += q_time
+            if q_time > max_time_val:
+                max_time_val = q_time
+                max_time_q = row["question_text"]
+
+            solutions.append({
+                "question": row["question_text"],
+                "user_answer": user_ans,
+                "correct_answer": row["answer"],
+                "is_correct": is_correct,
+                "time_taken": round(q_time, 2)
+            })
+        except Exception:
+            continue
+
+    avg_time = round(total_time / len(answers), 2) if answers else 0
+
+    # All correct → move to next level
     if correct_count == 10:
         if current_difficulty.lower() == "very easy":
             current_difficulty = "Easy"
@@ -104,9 +119,17 @@ def submit_answers():
         elif current_difficulty.lower() == "moderate":
             current_difficulty = "Difficult"
         else:
-            return jsonify({"result": "completed", "message": "🎉 Congratulations! You mastered all levels!"})
+            return jsonify({
+                "result": "completed",
+                "message": "🎉 Congratulations! You mastered all levels!",
+                "score": correct_count,
+                "solutions": solutions,
+                "average_time": avg_time,
+                "max_time_question": max_time_q,
+                "max_time_value": round(max_time_val, 2),
+                "elapsed_time": round(elapsed_time, 2)
+            })
 
-        # Initialize used questions for new difficulty
         if current_difficulty not in used_questions:
             used_questions[current_difficulty] = set()
 
@@ -120,29 +143,40 @@ def submit_answers():
 
         return jsonify({
             "result": "success",
-            "message": f"🎉 You completed the {current_difficulty} level!",
+            "message": f"✅ You completed {current_difficulty} level!",
+            "score": correct_count,
+            "solutions": solutions,
+            "average_time": avg_time,
+            "max_time_question": max_time_q,
+            "max_time_value": round(max_time_val, 2),
+            "elapsed_time": round(elapsed_time, 2),
             "next_level": current_difficulty,
             "questions": selected.to_dict(orient="records")
         })
 
-    else:
-        # Not all correct → send 10 other random questions in same level
-        available = dataset[
-            (dataset["difficulty"].str.lower() == current_difficulty.lower()) &
-            (~dataset["id"].isin(used_questions[current_difficulty]))
-        ]
-        if len(available) < 10:
-            used_questions[current_difficulty] = set()
-            available = dataset[dataset["difficulty"].str.lower() == current_difficulty.lower()]
+    # Failed case → retry with new questions
+    available = dataset[
+        (dataset["difficulty"].str.lower() == current_difficulty.lower()) &
+        (~dataset["id"].isin(used_questions[current_difficulty]))
+    ]
+    if len(available) < 10:
+        used_questions[current_difficulty] = set()
+        available = dataset[dataset["difficulty"].str.lower() == current_difficulty.lower()]
 
-        selected = available.sample(10)
-        used_questions[current_difficulty].update(selected["id"].tolist())
+    selected = available.sample(10)
+    used_questions[current_difficulty].update(selected["id"].tolist())
 
-        return jsonify({
-            "result": "fail",
-            "message": f"❌ You got {correct_count}/10 correct. Try these new questions.",
-            "questions": selected.to_dict(orient="records")
-        })
+    return jsonify({
+        "result": "fail",
+        "message": f"❌ You got {correct_count}/10 correct. Try again!",
+        "score": correct_count,
+        "solutions": solutions,
+        "average_time": avg_time,
+        "max_time_question": max_time_q,
+        "max_time_value": round(max_time_val, 2),
+        "elapsed_time": round(elapsed_time, 2),
+        "questions": selected.to_dict(orient="records")
+    })
 
 
 if __name__ == "__main__":
