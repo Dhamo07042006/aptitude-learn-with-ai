@@ -2,4 +2,6 @@ flask
 flask-cors
 pandas
 openpyxl
-pandas
+matplotlib
+seaborn
+python-docx

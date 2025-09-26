@@ -1,3 +1,4 @@
+// QuizPage.js
 import React, { useState, useEffect } from "react";
 import UploadDataset from "./UploadDataset";
 import "./QuizPage.css";
@@ -14,8 +15,8 @@ export default function QuizPage() {
   const [timer, setTimer] = useState(3600);
   const [testStarted, setTestStarted] = useState(false);
   const [nextQuestions, setNextQuestions] = useState(null);
-  const [solutions, setSolutions] = useState([]); // store per-question solutions
-  const [showSolutionIds, setShowSolutionIds] = useState(new Set()); // track which questions show solution
+  const [solutions, setSolutions] = useState([]);
+  const [showSolutionIds, setShowSolutionIds] = useState(new Set());
 
   // Timer effect
   useEffect(() => {
@@ -95,7 +96,6 @@ export default function QuizPage() {
       });
 
       const data = await res.json();
-
       if (data.questions) setNextQuestions(data.questions);
       if (data.solutions) setSolutions(data.solutions);
 
@@ -105,7 +105,6 @@ export default function QuizPage() {
       setFinished(true);
       setShowNextButton(true);
       setTestStarted(false);
-
     } catch (err) {
       console.error(err);
       setMessage("Submission failed. Check console.");
@@ -137,6 +136,35 @@ export default function QuizPage() {
     setShowSolutionIds(newSet);
   };
 
+  // ✅ Generate report
+  const handleGenerateReport = async () => {
+    if (!solutions || solutions.length === 0) {
+      alert("No solutions to generate report.");
+      return;
+    }
+    try {
+      const res = await fetch("http://localhost:5000/generate_report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ solutions, student_name: "Student" }),
+      });
+
+      if (!res.ok) throw new Error("Backend error");
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "student_report.docx";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err) {
+      console.error(err);
+      alert("Failed to generate report. Check backend.");
+    }
+  };
+
   return (
     <div className="quiz-container">
       <h1 className="quiz-title">Aptitude Quiz</h1>
@@ -151,6 +179,11 @@ export default function QuizPage() {
             <p className="question-text">
               {currentIndex + 1}. {questions[currentIndex].question_text}
             </p>
+            <p className="question-topic">
+              Topic: {questions[currentIndex].topic || "N/A"} | Subtopic:{" "}
+              {questions[currentIndex].subtopic || "N/A"}
+            </p>
+
             <ul className="options-list">
               {["a", "b", "c", "d"].map(
                 (opt) =>
@@ -205,11 +238,17 @@ export default function QuizPage() {
             solutions.map((s) => (
               <div key={s.question} className="solution-card">
                 <p className="question-text">{s.question}</p>
+                <p className="question-topic">
+                  Topic: {s.topic || "N/A"} | Subtopic: {s.subtopic || "N/A"}
+                </p>
+
                 <button
                   className="show-solution-btn"
                   onClick={() => toggleSolution(s.question)}
                 >
-                  {showSolutionIds.has(s.question) ? "Hide Solution" : "Show Solution"}
+                  {showSolutionIds.has(s.question)
+                    ? "Hide Solution"
+                    : "Show Solution"}
                 </button>
                 {showSolutionIds.has(s.question) && (
                   <div className="solution-text">
@@ -225,6 +264,15 @@ export default function QuizPage() {
           {showNextButton && (
             <button className="next-test-btn" onClick={startNextTest}>
               Start Next Test
+            </button>
+          )}
+
+          {solutions.length > 0 && (
+            <button
+              className="generate-report-btn"
+              onClick={handleGenerateReport}
+            >
+              📄 Generate Report
             </button>
           )}
         </div>
