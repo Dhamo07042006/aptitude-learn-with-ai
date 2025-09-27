@@ -62,6 +62,65 @@ def standardize_dataset(df):
 
     return df
 
+# -------------------- Question Selection --------------------
+def select_questions(available, difficulty, already_used, num=10):
+    """
+    Select questions in order: Difficulty → Topic → Subtopic → Random fallback
+    Ensures exactly `num` questions and maintains proportional distribution
+    """
+    if available.empty:
+        return pd.DataFrame()
+    
+    # Remove already used questions
+    available = available[~available["id"].isin(already_used)]
+    selected = pd.DataFrame()
+    
+    if available.empty:
+        return selected
+
+    # Group by topic and subtopic
+    grouped = available.groupby(["topic","subtopic"], sort=False)
+    
+    # Compute proportional allocation for each group
+    group_counts = grouped.size()
+    total_questions = group_counts.sum()
+    
+    group_allocation = {}
+    for (topic, subtopic), count in group_counts.items():
+        proportion = (count / total_questions) * num
+        group_allocation[(topic, subtopic)] = proportion
+    
+    # Assign floor values first
+    floor_alloc = {k: int(v) for k,v in group_allocation.items()}
+    allocated_total = sum(floor_alloc.values())
+    remaining_slots = num - allocated_total
+    
+    # Allocate remaining slots based on largest fractional part
+    fractional_parts = {k: group_allocation[k]-floor_alloc[k] for k in group_allocation}
+    for k in sorted(fractional_parts, key=fractional_parts.get, reverse=True):
+        if remaining_slots <= 0:
+            break
+        floor_alloc[k] += 1
+        remaining_slots -= 1
+    
+    # Sample questions per group according to allocation
+    for (topic, subtopic), count in floor_alloc.items():
+        group = grouped.get_group((topic, subtopic))
+        take = min(count, len(group))
+        selected = pd.concat([selected, group.sample(take, replace=False)])
+    
+    # Fallback: fill remaining if fewer than num
+    if len(selected) < num:
+        remaining = available[~available["id"].isin(selected["id"])]
+        extra_needed = num - len(selected)
+        if not remaining.empty:
+            selected = pd.concat([selected, remaining.sample(min(extra_needed, len(remaining)), replace=False)])
+    
+    selected = selected.head(num)
+    already_used.update(selected["id"].tolist())
+    
+    return selected
+
 # -------------------- Upload Dataset --------------------
 @app.route("/upload", methods=["POST"])
 def upload_dataset():
@@ -108,17 +167,7 @@ def upload_dataset():
 
     # Select 10 questions for the first test
     available = dataset[dataset["difficulty"].str.lower() == current_difficulty.lower()]
-    grouped = available.groupby(["topic", "subtopic"], sort=False) if "topic" in available.columns and "subtopic" in available.columns else [(("General","General"), available)]
-    selected = pd.DataFrame()
-    for _, group in grouped:
-        take = min(1, len(group))
-        selected = pd.concat([selected, group.sample(take)])
-    if len(selected) < 10:
-        remaining = available.drop(selected.index, errors="ignore")
-        extra_needed = 10 - len(selected)
-        selected = pd.concat([selected, remaining.sample(min(extra_needed, len(remaining)))])
-    selected = selected.head(10)
-    used_questions[current_difficulty].update(selected["id"].tolist())
+    selected = select_questions(available, current_difficulty, used_questions[current_difficulty], num=10)
 
     # Track session
     user_sessions["test_user"] = {"start_time": time.time(), "time_logs": {}}
@@ -204,8 +253,7 @@ def submit_answers():
         if len(remaining) < 10:
             used_questions[current_difficulty] = set()
             remaining = available
-        selected = remaining.sample(10)
-        used_questions[current_difficulty].update(selected["id"].tolist())
+        selected = select_questions(remaining, current_difficulty, used_questions[current_difficulty], num=10)
 
         return jsonify({
             "result": "success",
@@ -228,8 +276,7 @@ def submit_answers():
     if len(available) < 10:
         used_questions[current_difficulty] = set()
         available = dataset[dataset["difficulty"].str.lower() == current_difficulty.lower()]
-    selected = available.sample(10)
-    used_questions[current_difficulty].update(selected["id"].tolist())
+    selected = select_questions(available, current_difficulty, used_questions[current_difficulty], num=10)
 
     return jsonify({
         "result": "fail",
