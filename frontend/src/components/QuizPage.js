@@ -17,6 +17,7 @@ export default function QuizPage() {
   const [nextQuestions, setNextQuestions] = useState(null);
   const [solutions, setSolutions] = useState([]);
   const [showSolutionIds, setShowSolutionIds] = useState(new Set());
+  const [studentName, setStudentName] = useState(""); // <-- Added student name state
 
   // Timer effect
   useEffect(() => {
@@ -42,6 +43,11 @@ export default function QuizPage() {
   };
 
   const handleUploadSuccess = (firstQuestions) => {
+    if (!studentName) {
+      alert("Please enter your name before starting the test.");
+      return;
+    }
+
     setQuestions(firstQuestions);
     setMessage("");
     setCurrentIndex(0);
@@ -146,7 +152,7 @@ export default function QuizPage() {
       const res = await fetch("http://localhost:5000/generate_report", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ solutions, student_name: "Student" }),
+        body: JSON.stringify({ solutions, student_name: studentName || "Student" }),
       });
 
       if (!res.ok) throw new Error("Backend error");
@@ -155,7 +161,7 @@ export default function QuizPage() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "student_report.docx";
+      a.download = `${studentName || "Student"}_report.docx`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -170,7 +176,16 @@ export default function QuizPage() {
       <h1 className="quiz-title">Aptitude Quiz</h1>
 
       {!testStarted && !finished && (
-        <UploadDataset onUploadSuccess={handleUploadSuccess} />
+        <div>
+          <input
+            type="text"
+            placeholder="Enter your name"
+            value={studentName}
+            onChange={(e) => setStudentName(e.target.value)}
+            className="student-name-input"
+          />
+          <UploadDataset onUploadSuccess={handleUploadSuccess} />
+        </div>
       )}
 
       {questions.length > 0 && !finished && testStarted && (
