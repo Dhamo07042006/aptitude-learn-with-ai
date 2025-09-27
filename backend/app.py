@@ -29,13 +29,13 @@ def standardize_dataset(df):
     # Mapping variations to standard names
     rename_map = {
         "question_text": ["question_text","questiontext", "question text", "question", "ques", "q"],
-        "option_a": ["optiona", "option a", "a", "a)", "ans_a", "answer_a", "opt1", "option_a"],
-        "option_b": ["optionb", "option b", "b", "b)", "ans_b", "answer_b", "opt2", "option_b"],
-        "option_c": ["optionc", "option c", "c", "c)", "ans_c", "answer_c", "opt3", "option_c"],
-        "option_d": ["optiond", "option d", "d", "d)", "ans_d", "answer_d", "opt4", "option_d"],
+        "option_a": ["optiona", "option a", "a", "a)", "ans_a", "answer_a", "opt1", "option_a","A","A)"],
+        "option_b": ["optionb", "option b", "b", "b)", "ans_b", "answer_b", "opt2", "option_b","B","B)"],
+        "option_c": ["optionc", "option c", "c", "c)", "ans_c", "answer_c", "opt3", "option_c","C","C)"],
+        "option_d": ["optiond", "option d", "d", "d)", "ans_d", "answer_d", "opt4", "option_d","D","D)"],
         "answer": ["answer", "ans", "solution", "correct answer", "correct", "answer key"],
         "topic": ["topic", "subject", "category", "chapter"],
-        "subtopic": ["subtopic", "sub-topic", "section", "sub_section", "subchapter"],
+        "subtopic": ["subtopic", "sub-topic", "section", "sub_section", "subchapter","tag","TAG","tags","TAGS","Tags"],
         "difficulty": ["difficulty", "level", "hardness"]
     }
 
@@ -53,8 +53,8 @@ def standardize_dataset(df):
         "question_text": "No question text",
         "answer": "a",
         "difficulty": "Very easy",
-        "topic": "General",
-        "subtopic": "General"
+        "topic": "N/A",
+        "subtopic": "N/A"
     }
     for col, val in defaults.items():
         if col not in df.columns:
