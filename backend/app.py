@@ -1,14 +1,25 @@
+import os
+import time
 import pandas as pd
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
-import time
-import os
+from dotenv import load_dotenv
+import google.generativeai as genai
 
 # Import your report generator
 from ml_model import report_generator  # Make sure ml_model/__init__.py exists
 
+# -------------------- Flask Setup --------------------
 app = Flask(__name__)
 CORS(app)
+
+# -------------------- Load Gemini API Key --------------------
+load_dotenv()
+GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")  # Correctly load from environment
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+else:
+    print("⚠️ No Gemini API key found. Set GOOGLE_API_KEY in .env")
 
 # -------------------- Global Variables --------------------
 dataset = None
@@ -18,15 +29,8 @@ user_sessions = {}        # Track per-user sessions
 
 # -------------------- Utility Functions --------------------
 def standardize_dataset(df):
-    """
-    Normalize and standardize dataset columns.
-    Handles multiple variations for column names.
-    Ensures all required columns exist.
-    """
-    # Normalize column names: lowercase, strip spaces
     df.columns = [c.strip().lower() for c in df.columns]
 
-    # Mapping variations to standard names
     rename_map = {
         "question_text": ["question_text","questiontext", "question text", "question", "ques", "q"],
         "option_a": ["optiona", "option a", "a", "a)", "ans_a", "answer_a", "opt1", "option_a","A","A)"],
@@ -35,11 +39,10 @@ def standardize_dataset(df):
         "option_d": ["optiond", "option d", "d", "d)", "ans_d", "answer_d", "opt4", "option_d","D","D)"],
         "answer": ["answer", "ans", "solution", "correct answer", "correct", "answer key"],
         "topic": ["topic", "subject", "category", "chapter"],
-        "subtopic": ["subtopic", "sub-topic", "section", "sub_section", "subchapter","tag","TAG","tags","TAGS","Tags"],
+        "subtopic": ["subtopic", "sub-topic", "section", "sub_section", "subchapter","tag","tags","Tags"],
         "difficulty": ["difficulty", "level", "hardness"]
     }
 
-    # Map detected variants to standard names
     new_cols = {}
     for std_col, variants in rename_map.items():
         for variant in variants:
@@ -48,7 +51,6 @@ def standardize_dataset(df):
                 break
     df.rename(columns=new_cols, inplace=True)
 
-    # Ensure all required columns exist
     defaults = {
         "question_text": "No question text",
         "answer": "a",
@@ -62,40 +64,26 @@ def standardize_dataset(df):
 
     return df
 
-# -------------------- Question Selection --------------------
+
 def select_questions(available, difficulty, already_used, num=10):
-    """
-    Select questions in order: Difficulty → Topic → Subtopic → Random fallback
-    Ensures exactly `num` questions and maintains proportional distribution
-    """
     if available.empty:
         return pd.DataFrame()
     
-    # Remove already used questions
     available = available[~available["id"].isin(already_used)]
     selected = pd.DataFrame()
     
     if available.empty:
         return selected
 
-    # Group by topic and subtopic
     grouped = available.groupby(["topic","subtopic"], sort=False)
-    
-    # Compute proportional allocation for each group
     group_counts = grouped.size()
     total_questions = group_counts.sum()
     
-    group_allocation = {}
-    for (topic, subtopic), count in group_counts.items():
-        proportion = (count / total_questions) * num
-        group_allocation[(topic, subtopic)] = proportion
-    
-    # Assign floor values first
+    group_allocation = {k: (count / total_questions) * num for k, count in group_counts.items()}
     floor_alloc = {k: int(v) for k,v in group_allocation.items()}
     allocated_total = sum(floor_alloc.values())
     remaining_slots = num - allocated_total
     
-    # Allocate remaining slots based on largest fractional part
     fractional_parts = {k: group_allocation[k]-floor_alloc[k] for k in group_allocation}
     for k in sorted(fractional_parts, key=fractional_parts.get, reverse=True):
         if remaining_slots <= 0:
@@ -103,13 +91,11 @@ def select_questions(available, difficulty, already_used, num=10):
         floor_alloc[k] += 1
         remaining_slots -= 1
     
-    # Sample questions per group according to allocation
     for (topic, subtopic), count in floor_alloc.items():
         group = grouped.get_group((topic, subtopic))
         take = min(count, len(group))
         selected = pd.concat([selected, group.sample(take, replace=False)])
     
-    # Fallback: fill remaining if fewer than num
     if len(selected) < num:
         remaining = available[~available["id"].isin(selected["id"])]
         extra_needed = num - len(selected)
@@ -118,7 +104,6 @@ def select_questions(available, difficulty, already_used, num=10):
     
     selected = selected.head(num)
     already_used.update(selected["id"].tolist())
-    
     return selected
 
 # -------------------- Upload Dataset --------------------
@@ -130,19 +115,17 @@ def upload_dataset():
     if not file:
         return jsonify({"error": "No file uploaded"}), 400
 
-    # ------------------ Robust File Reading ------------------
     try:
         if file.filename.endswith(".xlsx"):
             df = pd.read_excel(file)
         else:
-            # Try multiple delimiters for CSV
             content = file.read().decode()
             file.seek(0)
             delimiters = [';', ',', '\t', '|']
             for delim in delimiters:
                 try:
                     df = pd.read_csv(file, sep=delim)
-                    if df.shape[1] > 1:  # Ensure multiple columns detected
+                    if df.shape[1] > 1:
                         break
                     file.seek(0)
                 except Exception:
@@ -151,25 +134,18 @@ def upload_dataset():
                 return jsonify({"error": "Failed to detect delimiter. Please use CSV with ; , \\t or |"}), 400
     except Exception as e:
         return jsonify({"error": f"Failed to read file: {str(e)}"}), 400
-    # ----------------------------------------------------------
 
-    # Standardize columns
     dataset = standardize_dataset(df)
-
-    # Add ID column if missing
     if "id" not in dataset.columns:
         dataset.insert(0, "id", range(1, len(dataset)+1))
 
-    # Reset tracking
     used_questions.clear()
     current_difficulty = "Very easy"
     used_questions[current_difficulty] = set()
 
-    # Select 10 questions for the first test
     available = dataset[dataset["difficulty"].str.lower() == current_difficulty.lower()]
     selected = select_questions(available, current_difficulty, used_questions[current_difficulty], num=10)
 
-    # Track session
     user_sessions["test_user"] = {"start_time": time.time(), "time_logs": {}}
 
     return jsonify({
@@ -229,7 +205,6 @@ def submit_answers():
 
     avg_time = round(total_time / len(answers), 2) if answers else 0
 
-    # -------------------- Determine Next Level or Retry --------------------
     if correct_count == 10:
         next_level_map = {"very easy": "Easy", "easy": "Moderate", "moderate": "Difficult"}
         current_difficulty = next_level_map.get(current_difficulty.lower(), None)
@@ -268,7 +243,6 @@ def submit_answers():
             "questions": selected.to_dict(orient="records")
         })
 
-    # Retry same level
     available = dataset[
         (dataset["difficulty"].str.lower() == current_difficulty.lower()) &
         (~dataset["id"].isin(used_questions[current_difficulty]))
@@ -312,6 +286,23 @@ def generate_report_endpoint():
     except Exception as e:
         print("Report generation error:", e)
         return jsonify({"error": f"Failed to generate report: {str(e)}"}), 500
+# -------------------- Chatbot Endpoint --------------------
+@app.route("/chatbot", methods=["POST"])
+def chatbot():
+    try:
+        data = request.json
+        user_message = data.get("message", "")
+
+        if not user_message:
+            return jsonify({"error": "Message required"}), 400
+
+        # ✅ Updated to a supported Gemini model
+        model = genai.GenerativeModel("gemini-2.5-flash-lite")
+        response = model.generate_content(user_message)
+        return jsonify({"reply": response.text})
+    except Exception as e:
+        print("Chatbot error:", e)
+        return jsonify({"error": str(e)}), 500
 
 # -------------------- Main --------------------
 if __name__ == "__main__":

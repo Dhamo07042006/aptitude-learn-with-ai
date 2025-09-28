@@ -1,5 +1,5 @@
 // QuizPage.js
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import UploadDataset from "./UploadDataset";
 import "./QuizPage.css";
 
@@ -17,7 +17,13 @@ export default function QuizPage() {
   const [nextQuestions, setNextQuestions] = useState(null);
   const [solutions, setSolutions] = useState([]);
   const [showSolutionIds, setShowSolutionIds] = useState(new Set());
-  const [studentName, setStudentName] = useState(""); // <-- Added student name state
+  const [studentName, setStudentName] = useState("");
+
+  // Chatbot state
+  const [chatInput, setChatInput] = useState("");
+  const [chatHistory, setChatHistory] = useState([]);
+  const [chatOpen, setChatOpen] = useState(false);
+  const chatWindowRef = useRef(null);
 
   // Timer effect
   useEffect(() => {
@@ -36,6 +42,13 @@ export default function QuizPage() {
     }
   }, [questions, finished, testStarted]);
 
+  // Auto-scroll chat to bottom
+  useEffect(() => {
+    if (chatWindowRef.current) {
+      chatWindowRef.current.scrollTop = chatWindowRef.current.scrollHeight;
+    }
+  }, [chatHistory]);
+
   const formatTime = (sec) => {
     const m = Math.floor(sec / 60).toString().padStart(2, "0");
     const s = (sec % 60).toString().padStart(2, "0");
@@ -47,7 +60,6 @@ export default function QuizPage() {
       alert("Please enter your name before starting the test.");
       return;
     }
-
     setQuestions(firstQuestions);
     setMessage("");
     setCurrentIndex(0);
@@ -60,6 +72,11 @@ export default function QuizPage() {
     setTestStarted(true);
     setSolutions([]);
     setShowSolutionIds(new Set());
+
+    // Reset chatbot for new test
+    setChatHistory([]);
+    setChatInput("");
+    setChatOpen(false); // Keep chat closed
   };
 
   const handleAnswer = (id, option) => {
@@ -79,7 +96,13 @@ export default function QuizPage() {
       setCurrentIndex(currentIndex + 1);
     else if (direction === "prev" && currentIndex > 0)
       setCurrentIndex(currentIndex - 1);
+
     setStartTime(Date.now());
+
+    // Keep chat open for same question
+    setChatInput("");
+    setChatHistory([]); // reset messages per question
+    setChatOpen(false);
   };
 
   const handleSubmit = async () => {
@@ -100,7 +123,6 @@ export default function QuizPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ answers, time_logs: timeLogs }),
       });
-
       const data = await res.json();
       if (data.questions) setNextQuestions(data.questions);
       if (data.solutions) setSolutions(data.solutions);
@@ -132,6 +154,11 @@ export default function QuizPage() {
       setNextQuestions(null);
       setSolutions([]);
       setShowSolutionIds(new Set());
+
+      // Reset chatbot for new test
+      setChatHistory([]);
+      setChatInput("");
+      setChatOpen(true); // Keep chat open
     }
   };
 
@@ -142,7 +169,6 @@ export default function QuizPage() {
     setShowSolutionIds(newSet);
   };
 
-  // ✅ Generate report
   const handleGenerateReport = async () => {
     if (!solutions || solutions.length === 0) {
       alert("No solutions to generate report.");
@@ -154,7 +180,6 @@ export default function QuizPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ solutions, student_name: studentName || "Student" }),
       });
-
       if (!res.ok) throw new Error("Backend error");
 
       const blob = await res.blob();
@@ -168,6 +193,25 @@ export default function QuizPage() {
     } catch (err) {
       console.error(err);
       alert("Failed to generate report. Check backend.");
+    }
+  };
+
+  const handleChatSend = async () => {
+    if (!chatInput.trim()) return;
+    const newMsg = { sender: "user", text: chatInput };
+    setChatHistory((prev) => [...prev, newMsg]);
+    setChatInput("");
+
+    try {
+      const res = await fetch("http://localhost:5000/chatbot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: newMsg.text }),
+      });
+      const data = await res.json();
+      setChatHistory((prev) => [...prev, { sender: "bot", text: data.reply }]);
+    } catch (err) {
+      setChatHistory((prev) => [...prev, { sender: "bot", text: "⚠️ Chatbot error" }]);
     }
   };
 
@@ -242,6 +286,56 @@ export default function QuizPage() {
             ⏳ Question {currentIndex + 1} of {questions.length}
           </p>
           <p className="timer">🕒 Time Left: {formatTime(timer)}</p>
+
+          {/* Chatbot Panel per question */}
+          <div className={`chatbot-container ${chatOpen ? "open" : "closed"}`}>
+            <button
+              className="chat-toggle-btn"
+              onClick={() => setChatOpen(!chatOpen)}
+            >
+              💬 {chatOpen ? "Close" : "Chat"}
+            </button>
+
+            {chatOpen && (
+              <div className="chat-panel">
+                <h2>💬 Chatbot Assistant</h2>
+                <div
+                  className="chat-window"
+                  ref={chatWindowRef}
+                  style={{
+                    maxHeight: "300px",
+                    overflowY: "auto",
+                    padding: "8px",
+                    border: "1px solid #ccc",
+                    marginBottom: "8px",
+                  }}
+                >
+                  {chatHistory.map((msg, i) => (
+                    <p
+                      key={i}
+                      className={msg.sender === "user" ? "chat-user" : "chat-bot"}
+                    >
+                      <b>{msg.sender === "user" ? "You" : "Bot"}:</b> {msg.text}
+                    </p>
+                  ))}
+                </div>
+                <div
+                  className="chat-input"
+                  style={{ display: "flex", gap: "8px" }}
+                >
+                  <input
+                    type="text"
+                    value={chatInput}
+                    placeholder="Ask the bot..."
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleChatSend()}
+                    style={{ flex: 1 }}
+                  />
+                  <button onClick={handleChatSend}>Send</button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
