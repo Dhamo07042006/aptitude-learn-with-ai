@@ -7,3 +7,5 @@ seaborn
 python-docx
 python-dotenv
 google-generativeai
+flask-bcrypt
+flask-sqlalchemy

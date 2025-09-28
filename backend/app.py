@@ -5,6 +5,8 @@ from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from dotenv import load_dotenv
 import google.generativeai as genai
+from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import generate_password_hash, check_password_hash
 
 # Import your report generator
 from ml_model import report_generator  # Make sure ml_model/__init__.py exists
@@ -13,9 +15,53 @@ from ml_model import report_generator  # Make sure ml_model/__init__.py exists
 app = Flask(__name__)
 CORS(app)
 
+# -------------------- Database Setup --------------------
+DB_PATH = r"C:\Users\Dhamodaran G\Desktop\aptitude-system\users.db"
+app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{DB_PATH}"
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+db = SQLAlchemy(app)
+
+# -------------------- User Model --------------------
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(100), unique=True, nullable=False)
+    password = db.Column(db.String(200), nullable=False)
+
+# -------------------- Auth Routes --------------------
+@app.route("/signup", methods=["POST"])
+def signup():
+    data = request.json
+    username = data.get("username")
+    password = data.get("password")
+
+    if not username or not password:
+        return jsonify({"error": "Username and password required"}), 400
+
+    if User.query.filter_by(username=username).first():
+        return jsonify({"error": "Username already exists"}), 400
+
+    hashed_pw = generate_password_hash(password)
+    new_user = User(username=username, password=hashed_pw)
+    db.session.add(new_user)
+    db.session.commit()
+
+    return jsonify({"message": "Signup successful!"})
+
+@app.route("/login", methods=["POST"])
+def login():
+    data = request.json
+    username = data.get("username")
+    password = data.get("password")
+
+    user = User.query.filter_by(username=username).first()
+    if not user or not check_password_hash(user.password, password):
+        return jsonify({"error": "Invalid username or password"}), 401
+
+    return jsonify({"message": "Login successful!", "username": username})
+
 # -------------------- Load Gemini API Key --------------------
 load_dotenv()
-GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")  # Correctly load from environment
+GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 else:
@@ -23,14 +69,13 @@ else:
 
 # -------------------- Global Variables --------------------
 dataset = None
-used_questions = {}       # Track used question IDs per difficulty
+used_questions = {}
 current_difficulty = "Very easy"
-user_sessions = {}        # Track per-user sessions
+user_sessions = {}
 
 # -------------------- Utility Functions --------------------
 def standardize_dataset(df):
     df.columns = [c.strip().lower() for c in df.columns]
-
     rename_map = {
         "question_text": ["question_text","questiontext", "question text", "question", "ques", "q"],
         "option_a": ["optiona", "option a", "a", "a)", "ans_a", "answer_a", "opt1", "option_a","A","A)"],
@@ -63,7 +108,6 @@ def standardize_dataset(df):
             df[col] = val
 
     return df
-
 
 def select_questions(available, difficulty, already_used, num=10):
     if available.empty:
@@ -264,7 +308,7 @@ def submit_answers():
         "questions": selected.to_dict(orient="records")
     })
 
-# -------------------- Generate Report --------------------
+# -------------------- Generate Report with Gemini AI Analysis --------------------
 @app.route("/generate_report", methods=["POST"])
 def generate_report_endpoint():
     data = request.json
@@ -275,6 +319,7 @@ def generate_report_endpoint():
         return jsonify({"error": "No solutions provided for report"}), 400
 
     try:
+        # Generate standard report first
         reports_dir = "backend/reports"
         os.makedirs(reports_dir, exist_ok=True)
         report_path = report_generator.generate_report(
@@ -282,10 +327,31 @@ def generate_report_endpoint():
             output_dir=reports_dir,
             student_name=student_name
         )
+
+        # -------------------- Gemini AI Analysis --------------------
+        if GEMINI_API_KEY:
+            try:
+                model = genai.GenerativeModel("gemini-2.5-flash-lite")
+                prompt = (
+                    f"Summarize the test performance of student {student_name}. "
+                    "Provide a concise, professional analysis highlighting strengths, weaknesses, "
+                    "and any suggestions for improvement."
+                )
+                ai_response = model.generate_content(prompt)
+                ai_summary = ai_response.text.strip()
+
+                # Append AI analysis at the end of the report
+                report_generator.append_ai_analysis(report_path, ai_summary)
+
+            except Exception as e:
+                print("Gemini AI analysis error:", e)
+
         return send_file(report_path, as_attachment=True)
+
     except Exception as e:
         print("Report generation error:", e)
         return jsonify({"error": f"Failed to generate report: {str(e)}"}), 500
+
 # -------------------- Chatbot Endpoint --------------------
 @app.route("/chatbot", methods=["POST"])
 def chatbot():
@@ -296,7 +362,6 @@ def chatbot():
         if not user_message:
             return jsonify({"error": "Message required"}), 400
 
-        # ✅ Updated to a supported Gemini model
         model = genai.GenerativeModel("gemini-2.5-flash-lite")
         response = model.generate_content(user_message)
         return jsonify({"reply": response.text})

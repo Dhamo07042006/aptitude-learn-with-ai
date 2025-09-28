@@ -25,6 +25,12 @@ export default function QuizPage() {
   const [chatOpen, setChatOpen] = useState(false);
   const chatWindowRef = useRef(null);
 
+  // Load studentName from localStorage (or any DB/session logic)
+  useEffect(() => {
+    const user = JSON.parse(localStorage.getItem("user")); // replace with your login info
+    if (user && user.username) setStudentName(user.username);
+  }, []);
+
   // Timer effect
   useEffect(() => {
     if (questions.length > 0 && !finished && testStarted) {
@@ -56,10 +62,6 @@ export default function QuizPage() {
   };
 
   const handleUploadSuccess = (firstQuestions) => {
-    if (!studentName) {
-      alert("Please enter your name before starting the test.");
-      return;
-    }
     setQuestions(firstQuestions);
     setMessage("");
     setCurrentIndex(0);
@@ -221,13 +223,6 @@ export default function QuizPage() {
 
       {!testStarted && !finished && (
         <div>
-          <input
-            type="text"
-            placeholder="Enter your name"
-            value={studentName}
-            onChange={(e) => setStudentName(e.target.value)}
-            className="student-name-input"
-          />
           <UploadDataset onUploadSuccess={handleUploadSuccess} />
         </div>
       )}
