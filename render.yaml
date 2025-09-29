@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: aptitude-learn-with-ai-backend
+    env: python
+    region: oregon
+    branch: main
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    plan: free
