@@ -16,7 +16,7 @@ app = Flask(__name__)
 CORS(app)
 
 # -------------------- Database Setup --------------------
-DB_PATH = r"C:\Users\Dhamodaran G\Desktop\aptitude-system\backend\users.db"
+DB_PATH = r"users.db"
 app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{DB_PATH}"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
