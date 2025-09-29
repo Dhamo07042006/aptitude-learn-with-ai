@@ -1,0 +1,11 @@
+Flask
+flask-cors
+pandas
+openpyxl
+matplotlib
+seaborn
+python-docx
+python-dotenv
+google-generativeai
+flask-bcrypt
+flask-sqlalchemy
