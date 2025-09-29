@@ -9,3 +9,6 @@ python-dotenv
 google-generativeai
 flask-bcrypt
 flask-sqlalchemy
+werkzeug
+gunicorn
+
