@@ -16,7 +16,7 @@ app = Flask(__name__)
 CORS(app)
 
 # -------------------- Database Setup --------------------
-DB_PATH = r"C:\Users\Dhamodaran G\Desktop\aptitude-system\users.db"
+DB_PATH = r"C:\Users\Dhamodaran G\Desktop\aptitude-system\backend\users.db"
 app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{DB_PATH}"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
@@ -371,4 +371,7 @@ def chatbot():
 
 # -------------------- Main --------------------
 if __name__ == "__main__":
-    app.run(debug=True)
+    # Use host 0.0.0.0 so external servers can reach your app
+    # Use PORT environment variable provided by Render, default to 5000 locally
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
