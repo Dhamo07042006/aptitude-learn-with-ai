@@ -7,6 +7,8 @@ from dotenv import load_dotenv
 import google.generativeai as genai
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
+from flasgger import Swagger
+
 
 # Import your report generator
 from ml_model import report_generator  # Make sure ml_model/__init__.py exists
@@ -14,6 +16,7 @@ from ml_model import report_generator  # Make sure ml_model/__init__.py exists
 # -------------------- Flask Setup --------------------
 app = Flask(__name__)
 CORS(app)
+Swagger(app) 
 
 # -------------------- Database Setup --------------------
 DB_PATH = r"users.db"
